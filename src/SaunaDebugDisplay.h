@@ -33,7 +33,11 @@ private:
   // --------------------------------------------------
 
   static const int HEADER_H = 36;
-  static const int MAX_LINES = 27;
+
+  // 22 pixels between lines gives much better readability.
+  // 20 lines fit on the 800x480 display.
+  static const int LINE_HEIGHT = 22;
+  static const int MAX_LINES = 20;
 
 
   String _lines[MAX_LINES];
@@ -46,8 +50,8 @@ private:
   // --------------------------------------------------
 
   uint16_t _background      = 0x0000;  // Black
-  uint16_t _foreground      = 0xFFFF;  // White
-  uint16_t _headerTextColor = 0x0320;  // Dark green
+  uint16_t _foreground      = 0xFFFF; // White
+  uint16_t _headerTextColor = 0x0320; // Dark green
 
 
   // ==================================================
@@ -309,6 +313,18 @@ private:
 
 
   // ==================================================
+  // Numeric glyph detection
+  // ==================================================
+
+  bool isNumericGlyph(char c) {
+
+    return (
+      c >= '0' && c <= '9'
+    );
+  }
+
+
+  // ==================================================
   // Pixel
   // ==================================================
 
@@ -348,11 +364,23 @@ private:
 
     glyph(c, g);
 
+    bool flipVertical =
+      isNumericGlyph(c);
+
+
     for (int col = 0; col < 5; col++) {
 
       for (int row = 0; row < 7; row++) {
 
-        if (g[col] & (1 << row)) {
+        int sourceRow = row;
+
+        // Numbers and numeric symbols were encoded
+        // vertically mirrored. Flip only those glyphs.
+        if (flipVertical) {
+          sourceRow = 6 - row;
+        }
+
+        if (g[col] & (1 << sourceRow)) {
 
           for (int dx = 0; dx < SCALE; dx++) {
 
@@ -363,6 +391,7 @@ private:
                 y + row * SCALE + dy,
                 color
               );
+
             }
           }
         }
@@ -413,6 +442,7 @@ private:
         _buffer[
           y * _width + x
         ] = _background;
+
       }
     }
 
@@ -489,6 +519,7 @@ private:
           _buffer[
             y * _width + x
           ] = _background;
+
         }
       }
     }
@@ -555,7 +586,7 @@ private:
       drawString(
         16,
         HEADER_H + 8 +
-        i * (CHAR_H * SCALE),
+        i * LINE_HEIGHT,
         _lines[i],
         _foreground
       );
