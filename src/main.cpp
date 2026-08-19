@@ -1,6 +1,8 @@
 #include <Arduino.h>
+#include <WiFi.h>
 #include <esp_display_panel.hpp>
 #include "SaunaDebugDisplay.h"
+#include "wifi_secrets.h"
 
 using namespace esp_panel::board;
 using namespace esp_panel::drivers;
@@ -9,6 +11,85 @@ Board *board = nullptr;
 LCD *lcd = nullptr;
 
 SaunaDebugDisplay debug;
+
+constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 10000;
+constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS = 10000;
+
+unsigned long lastWiFiReconnectAttempt = 0;
+bool wifiWasConnected = false;
+
+
+void printWiFiStatus(bool ok) {
+
+  String line = "WiFi";
+
+  while (line.length() < 22) {
+    line += " ";
+  }
+
+  line += ok ? "OK" : "WAITING";
+
+  Serial.println(line);
+}
+
+
+void startWiFiConnection(
+  const char *message,
+  const char *displayStatus
+) {
+
+  Serial.println(message);
+  Serial.println(message);
+  printWiFiStatus(false);
+  debug.wifiStatus(displayStatus);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  lastWiFiReconnectAttempt = millis();
+}
+
+
+void showWiFiConnection() {
+
+  Serial.print("WiFi SSID: ");
+  Serial.println(WIFI_SSID);
+  Serial.print("WiFi IP: ");
+  Serial.println(WiFi.localIP());
+
+  printWiFiStatus(true);
+  Serial.println("SSID: " + String(WIFI_SSID));
+  Serial.println("IP: " + WiFi.localIP().toString());
+  debug.wifiStatus(
+    "WiFi    OK  " + WiFi.localIP().toString()
+  );
+
+  wifiWasConnected = true;
+}
+
+
+void connectWiFiAtStartup() {
+
+  WiFi.mode(WIFI_STA);
+  startWiFiConnection(
+    "WiFi connecting...",
+    "WiFi    CONNECTING..."
+  );
+
+  const unsigned long startedAt = millis();
+
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - startedAt < WIFI_CONNECT_TIMEOUT_MS) {
+    debug.update();
+    delay(100);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    showWiFiConnection();
+  } else {
+    Serial.println("WiFi connection timed out");
+    Serial.println("WiFi timeout");
+    debug.wifiStatus("WiFi    TIMEOUT");
+  }
+}
 
 
 void setup() {
@@ -141,6 +222,13 @@ void setup() {
 
   debug.println("");
   debug.println("System running");
+
+
+  // --------------------------------------------------
+  // WiFi
+  // --------------------------------------------------
+
+  connectWiFiAtStartup();
 }
 
 
@@ -149,5 +237,29 @@ void loop() {
   // Update uptime clock
   debug.update();
 
-  delay(1000);
+
+  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+
+  if (wifiConnected && !wifiWasConnected) {
+    showWiFiConnection();
+  }
+
+  if (!wifiConnected && wifiWasConnected) {
+    Serial.println("WiFi disconnected");
+    Serial.println("WiFi disconnected");
+    debug.wifiStatus("WiFi    WAITING");
+    wifiWasConnected = false;
+  }
+
+  if (!wifiConnected &&
+      millis() - lastWiFiReconnectAttempt >=
+        WIFI_RECONNECT_INTERVAL_MS) {
+
+    startWiFiConnection(
+      "WiFi reconnecting...",
+      "WiFi    RECONNECTING..."
+    );
+  }
+
+  delay(100);
 }

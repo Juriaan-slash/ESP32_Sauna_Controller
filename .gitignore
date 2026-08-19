@@ -5,6 +5,7 @@
 # Environment / secrets
 .env
 .env.*
+include/wifi_secrets.h
 
 # ==========================================
 # VS Code

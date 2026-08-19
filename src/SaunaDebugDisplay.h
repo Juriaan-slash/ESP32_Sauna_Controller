@@ -38,9 +38,12 @@ private:
   // 20 lines fit on the 800x480 display.
   static const int LINE_HEIGHT = 22;
   static const int MAX_LINES = 20;
+  static const int WIFI_STATUS_Y =
+    HEADER_H + 8 + 15 * LINE_HEIGHT;
 
 
   String _lines[MAX_LINES];
+  String _wifiStatus;
 
   int _lineCount = 0;
 
@@ -59,8 +62,6 @@ private:
   // ==================================================
 
   void glyph(char c, uint8_t g[5]) {
-
-    c = toupper(c);
 
     memset(g, 0, 5);
 
@@ -194,6 +195,141 @@ private:
       case 'Z':
         g[0]=0x61; g[1]=0x51; g[2]=0x49;
         g[3]=0x45; g[4]=0x43;
+        break;
+
+
+      // ------------------------------------------------
+      // Lowercase letters
+      // ------------------------------------------------
+
+      case 'a':
+        g[0]=0x20; g[1]=0x54; g[2]=0x54;
+        g[3]=0x54; g[4]=0x78;
+        break;
+
+      case 'b':
+        g[0]=0x7F; g[1]=0x48; g[2]=0x44;
+        g[3]=0x44; g[4]=0x38;
+        break;
+
+      case 'c':
+        g[0]=0x38; g[1]=0x44; g[2]=0x44;
+        g[3]=0x44; g[4]=0x20;
+        break;
+
+      case 'd':
+        g[0]=0x38; g[1]=0x44; g[2]=0x44;
+        g[3]=0x48; g[4]=0x7F;
+        break;
+
+      case 'e':
+        g[0]=0x38; g[1]=0x54; g[2]=0x54;
+        g[3]=0x54; g[4]=0x18;
+        break;
+
+      case 'f':
+        g[0]=0x08; g[1]=0x7E; g[2]=0x09;
+        g[3]=0x01; g[4]=0x02;
+        break;
+
+      case 'g':
+        g[0]=0x0C; g[1]=0x52; g[2]=0x52;
+        g[3]=0x52; g[4]=0x3E;
+        break;
+
+      case 'h':
+        g[0]=0x7F; g[1]=0x08; g[2]=0x04;
+        g[3]=0x04; g[4]=0x78;
+        break;
+
+      case 'i':
+        g[0]=0x00; g[1]=0x44; g[2]=0x7D;
+        g[3]=0x40; g[4]=0x00;
+        break;
+
+      case 'j':
+        g[0]=0x20; g[1]=0x40; g[2]=0x44;
+        g[3]=0x3D; g[4]=0x00;
+        break;
+
+      case 'k':
+        g[0]=0x7F; g[1]=0x10; g[2]=0x28;
+        g[3]=0x44; g[4]=0x00;
+        break;
+
+      case 'l':
+        g[0]=0x00; g[1]=0x41; g[2]=0x7F;
+        g[3]=0x40; g[4]=0x00;
+        break;
+
+      case 'm':
+        g[0]=0x7C; g[1]=0x04; g[2]=0x18;
+        g[3]=0x04; g[4]=0x78;
+        break;
+
+      case 'n':
+        g[0]=0x7C; g[1]=0x08; g[2]=0x04;
+        g[3]=0x04; g[4]=0x78;
+        break;
+
+      case 'o':
+        g[0]=0x38; g[1]=0x44; g[2]=0x44;
+        g[3]=0x44; g[4]=0x38;
+        break;
+
+      case 'p':
+        g[0]=0x7C; g[1]=0x14; g[2]=0x14;
+        g[3]=0x14; g[4]=0x08;
+        break;
+
+      case 'q':
+        g[0]=0x08; g[1]=0x14; g[2]=0x14;
+        g[3]=0x18; g[4]=0x7C;
+        break;
+
+      case 'r':
+        g[0]=0x7C; g[1]=0x08; g[2]=0x04;
+        g[3]=0x04; g[4]=0x08;
+        break;
+
+      case 's':
+        g[0]=0x48; g[1]=0x54; g[2]=0x54;
+        g[3]=0x54; g[4]=0x20;
+        break;
+
+      case 't':
+        g[0]=0x04; g[1]=0x3F; g[2]=0x44;
+        g[3]=0x40; g[4]=0x20;
+        break;
+
+      case 'u':
+        g[0]=0x3C; g[1]=0x40; g[2]=0x40;
+        g[3]=0x20; g[4]=0x7C;
+        break;
+
+      case 'v':
+        g[0]=0x1C; g[1]=0x20; g[2]=0x40;
+        g[3]=0x20; g[4]=0x1C;
+        break;
+
+      case 'w':
+        g[0]=0x3C; g[1]=0x40; g[2]=0x30;
+        g[3]=0x40; g[4]=0x3C;
+        break;
+
+      case 'x':
+        g[0]=0x44; g[1]=0x28; g[2]=0x10;
+        g[3]=0x28; g[4]=0x44;
+        break;
+
+      case 'y':
+        g[0]=0x0C; g[1]=0x50; g[2]=0x50;
+        g[3]=0x50; g[4]=0x3C;
+        break;
+
+      case 'z':
+        g[0]=0x44; g[1]=0x64; g[2]=0x54;
+        g[3]=0x4C; g[4]=0x44;
         break;
 
 
@@ -548,6 +684,42 @@ private:
 
 
   // ==================================================
+  // WiFi status
+  // ==================================================
+
+  void drawWiFiStatus() {
+
+    const int y = WIFI_STATUS_Y;
+
+    const int height =
+      (y + LINE_HEIGHT <= _height) ?
+        LINE_HEIGHT : _height - y;
+
+    if (height <= 0)
+      return;
+
+
+    for (int row = y; row < y + height; row++) {
+
+      for (int x = 0; x < _width; x++) {
+
+        _buffer[
+          row * _width + x
+        ] = _background;
+      }
+    }
+
+
+    drawString(
+      16,
+      y,
+      _wifiStatus,
+      _foreground
+    );
+  }
+
+
+  // ==================================================
   // Full redraw
   // ==================================================
 
@@ -591,6 +763,11 @@ private:
         _foreground
       );
     }
+
+
+    // Fixed WiFi status area
+
+    drawWiFiStatus();
 
 
     // Send framebuffer
@@ -661,6 +838,7 @@ public:
   void clear() {
 
     _lineCount = 0;
+    _wifiStatus = "";
 
     if (_lcd)
       redraw();
@@ -790,6 +968,41 @@ public:
       name +
       ": " +
       message
+    );
+  }
+
+
+  // ==================================================
+  // Fixed WiFi status
+  // ==================================================
+
+  void wifiStatus(
+    const String& text
+  ) {
+
+    _wifiStatus = text;
+
+    if (!_buffer || !_lcd)
+      return;
+
+
+    const int y = WIFI_STATUS_Y;
+
+    const int height =
+      (y + LINE_HEIGHT <= _height) ?
+        LINE_HEIGHT : _height - y;
+
+
+    drawWiFiStatus();
+
+    _lcd->drawBitmap(
+      0,
+      y,
+      _width,
+      height,
+      (const uint8_t*)(
+        _buffer + y * _width
+      )
     );
   }
 
