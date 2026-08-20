@@ -1,227 +1,954 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <time.h>
 #include <esp_display_panel.hpp>
+
+#include "DebugLog.h"
 #include "SaunaDebugDisplay.h"
+#include "PCF85063.h"
 #include "wifi_secrets.h"
 
 using namespace esp_panel::board;
 using namespace esp_panel::drivers;
 
-Board *board = nullptr;
-LCD *lcd = nullptr;
 
-SaunaDebugDisplay debug;
+// ==================================================
+// Board / display
+// ==================================================
+
+Board* board = nullptr;
+LCD* lcd = nullptr;
+
+SaunaDebugDisplay debugDisplay;
+
+
+// ==================================================
+// RTC
+// ==================================================
+
+PCF85063 rtc;
+
+PCF85063::DateTime rtcDateTime;
+
+bool rtcValid = false;
+
+
+// ==================================================
+// NTP
+// ==================================================
+
+constexpr char TIMEZONE[] =
+  "CET-1CEST,M3.5.0,M10.5.0/3";
+
+bool ntpStarted = false;
+bool rtcSyncedFromNtp = false;
+
+
+// ==================================================
+// WiFi
+// ==================================================
 
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 10000;
 constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS = 10000;
 
 unsigned long lastWiFiReconnectAttempt = 0;
+unsigned long wifiReconnectCount = 0;
+
 bool wifiWasConnected = false;
 
 
-void printWiFiStatus(bool ok) {
+// ==================================================
+// Dashboard timing
+// ==================================================
 
-  String line = "WiFi";
+unsigned long initTimeMs = 0;
+unsigned long lastDashboardUpdate = 0;
 
-  while (line.length() < 22) {
+
+// ==================================================
+// Formatting helpers
+// ==================================================
+
+static String formatRuntime(
+  unsigned long milliseconds
+) {
+
+  unsigned long totalSeconds =
+    milliseconds / 1000UL;
+
+  const unsigned long hours =
+    totalSeconds / 3600UL;
+
+  totalSeconds %= 3600UL;
+
+  const unsigned long minutes =
+    totalSeconds / 60UL;
+
+  const unsigned long seconds =
+    totalSeconds % 60UL;
+
+  char buffer[16];
+
+  snprintf(
+    buffer,
+    sizeof(buffer),
+    "%02lu:%02lu:%02lu",
+    hours,
+    minutes,
+    seconds
+  );
+
+  return String(buffer);
+}
+
+
+static String formatRtcDateTime(
+  const PCF85063::DateTime& dt
+) {
+
+  char buffer[32];
+
+  snprintf(
+    buffer,
+    sizeof(buffer),
+    "%04d-%02d-%02d %02d:%02d:%02d",
+    dt.year,
+    dt.month,
+    dt.day,
+    dt.hour,
+    dt.minute,
+    dt.second
+  );
+
+  return String(buffer);
+}
+
+
+// ==================================================
+// RTC
+// ==================================================
+
+static bool readRtc() {
+
+  if (
+    !rtc.read(
+      rtcDateTime
+    )
+  ) {
+
+    rtcValid = false;
+
+    return false;
+  }
+
+  rtcValid = true;
+
+  return true;
+}
+
+
+static void updateRtcDashboard() {
+
+  if (rtcValid) {
+
+    debugDisplay.setDateTime(
+      formatRtcDateTime(
+        rtcDateTime
+      ),
+      "OK"
+    );
+
+  } else {
+
+    debugDisplay.setDateTime(
+      "RTC INVALID",
+      "INVALID"
+    );
+  }
+}
+
+
+// ==================================================
+// NTP
+// ==================================================
+
+static void startNtp() {
+
+  if (ntpStarted) {
+    return;
+  }
+
+  configTzTime(
+    TIMEZONE,
+    "pool.ntp.org",
+    "time.nist.gov"
+  );
+
+  ntpStarted = true;
+
+  DebugLog::println(
+    "NTP started"
+  );
+}
+
+
+static bool syncRtcFromNtp() {
+
+  if (!ntpStarted) {
+    return false;
+  }
+
+  struct tm timeInfo;
+
+  if (
+    !getLocalTime(
+      &timeInfo,
+      5000
+    )
+  ) {
+
+    DebugLog::println(
+      "NTP time not available"
+    );
+
+    return false;
+  }
+
+
+  PCF85063::DateTime newTime;
+
+  newTime.year =
+    timeInfo.tm_year + 1900;
+
+  newTime.month =
+    timeInfo.tm_mon + 1;
+
+  newTime.day =
+    timeInfo.tm_mday;
+
+  newTime.weekday =
+    timeInfo.tm_wday;
+
+  newTime.hour =
+    timeInfo.tm_hour;
+
+  newTime.minute =
+    timeInfo.tm_min;
+
+  newTime.second =
+    timeInfo.tm_sec;
+
+
+  DebugLog::printf(
+    "NTP time: %04d-%02d-%02d %02d:%02d:%02d\n",
+    newTime.year,
+    newTime.month,
+    newTime.day,
+    newTime.hour,
+    newTime.minute,
+    newTime.second
+  );
+
+
+  if (
+    !rtc.write(
+      newTime
+    )
+  ) {
+
+    DebugLog::println(
+      "RTC write failed"
+    );
+
+    return false;
+  }
+
+
+  // Read the newly written time back.
+  if (
+    !readRtc()
+  ) {
+
+    DebugLog::println(
+      "RTC read-back failed"
+    );
+
+    return false;
+  }
+
+
+  DebugLog::println(
+    "RTC synchronized from NTP"
+  );
+
+
+  rtcSyncedFromNtp =
+    true;
+
+
+  return true;
+}
+
+
+// ==================================================
+// WiFi
+// ==================================================
+
+static void printWiFiStatus(
+  bool ok
+) {
+
+  String line =
+    "WiFi";
+
+  while (
+    line.length() < 22
+  ) {
+
     line += " ";
   }
 
-  line += ok ? "OK" : "WAITING";
+  line +=
+    ok ? "OK" : "WAITING";
 
-  Serial.println(line);
+  DebugLog::println(
+    line
+  );
 }
 
 
-void startWiFiConnection(
-  const char *message,
-  const char *displayStatus
+static void updateConnectionDashboard() {
+
+  const bool connected =
+    WiFi.status() ==
+    WL_CONNECTED;
+
+
+  if (connected) {
+
+    debugDisplay.setConnection(
+      "OK",
+      WIFI_SSID,
+      WiFi.localIP().toString(),
+      String(WiFi.RSSI()) +
+        " dBm",
+      rtcValid
+        ? "OK"
+        : "INVALID"
+    );
+
+  } else {
+
+    debugDisplay.setConnection(
+      "WAITING",
+      WIFI_SSID,
+      "---",
+      "---",
+      rtcValid
+        ? "OK"
+        : "INVALID"
+    );
+  }
+}
+
+
+static void startWiFiConnection(
+  const char* message,
+  const char* displayStatus
 ) {
 
-  Serial.println(message);
-  Serial.println(message);
-  printWiFiStatus(false);
-  debug.wifiStatus(displayStatus);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  lastWiFiReconnectAttempt = millis();
-}
-
-
-void showWiFiConnection() {
-
-  Serial.print("WiFi SSID: ");
-  Serial.println(WIFI_SSID);
-  Serial.print("WiFi IP: ");
-  Serial.println(WiFi.localIP());
-
-  printWiFiStatus(true);
-  Serial.println("SSID: " + String(WIFI_SSID));
-  Serial.println("IP: " + WiFi.localIP().toString());
-  debug.wifiStatus(
-    "WiFi    OK  " + WiFi.localIP().toString()
+  DebugLog::println(
+    message
   );
 
-  wifiWasConnected = true;
+  printWiFiStatus(
+    false
+  );
+
+
+  debugDisplay.setConnection(
+    displayStatus,
+    WIFI_SSID,
+    "---",
+    "---",
+    rtcValid
+      ? "OK"
+      : "INVALID"
+  );
+
+
+  WiFi.begin(
+    WIFI_SSID,
+    WIFI_PASSWORD
+  );
+
+
+  lastWiFiReconnectAttempt =
+    millis();
 }
 
 
-void connectWiFiAtStartup() {
+static void showWiFiConnection() {
 
-  WiFi.mode(WIFI_STA);
+  const String ip =
+    WiFi.localIP().toString();
+
+
+  DebugLog::print(
+    "WiFi SSID: "
+  );
+
+  DebugLog::println(
+    WIFI_SSID
+  );
+
+
+  DebugLog::print(
+    "WiFi IP: "
+  );
+
+  DebugLog::println(
+    ip
+  );
+
+
+  printWiFiStatus(
+    true
+  );
+
+
+  DebugLog::println(
+    "SSID: " +
+    String(WIFI_SSID)
+  );
+
+
+  DebugLog::println(
+    "IP: " +
+    ip
+  );
+
+
+  updateConnectionDashboard();
+
+
+  wifiWasConnected =
+    true;
+
+
+  startNtp();
+}
+
+
+static void connectWiFiAtStartup() {
+
+  WiFi.mode(
+    WIFI_STA
+  );
+
+
   startWiFiConnection(
     "WiFi connecting...",
-    "WiFi    CONNECTING..."
+    "CONNECTING"
   );
 
-  const unsigned long startedAt = millis();
 
-  while (WiFi.status() != WL_CONNECTED &&
-         millis() - startedAt < WIFI_CONNECT_TIMEOUT_MS) {
-    debug.update();
+  const unsigned long startedAt =
+    millis();
+
+
+  while (
+    WiFi.status() !=
+      WL_CONNECTED &&
+    millis() - startedAt <
+      WIFI_CONNECT_TIMEOUT_MS
+  ) {
+
     delay(100);
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
+
+  if (
+    WiFi.status() ==
+    WL_CONNECTED
+  ) {
+
     showWiFiConnection();
+
   } else {
-    Serial.println("WiFi connection timed out");
-    Serial.println("WiFi timeout");
-    debug.wifiStatus("WiFi    TIMEOUT");
+
+    DebugLog::println(
+      "WiFi connection timed out"
+    );
+
+
+    debugDisplay.setConnection(
+      "TIMEOUT",
+      WIFI_SSID,
+      "---",
+      "---",
+      rtcValid
+        ? "OK"
+        : "INVALID"
+    );
   }
 }
 
 
+// ==================================================
+// Dashboard
+// ==================================================
+
+static void buildDashboard() {
+
+  debugDisplay.setSystem(
+    "OK",
+    "OK",
+    "OK",
+    String(initTimeMs) +
+      " ms",
+    formatRuntime(millis())
+  );
+
+
+  updateConnectionDashboard();
+
+
+  debugDisplay.setSensors(
+    "WAITING",
+    "WAITING",
+    "--",
+    "--"
+  );
+
+
+  debugDisplay.setTestValues(
+    "23.4 C",
+    "48.0 %",
+    "1012.0 hPa"
+  );
+
+
+  debugDisplay.setSystemLog(
+    "OK",
+    "OK",
+    "OK",
+    String(wifiReconnectCount)
+  );
+
+
+  debugDisplay.setHardware(
+    ESP.getPsramSize() > 0
+      ? "OK"
+      : "NO",
+
+    String(
+      ESP.getFreeHeap()
+    ) + " B",
+
+    String(
+      ESP.getFlashChipSize() /
+      (1024UL * 1024UL)
+    ) + " MB",
+
+    String(
+      ESP.getCpuFreqMHz()
+    ) + " MHz"
+  );
+
+
+  updateRtcDashboard();
+
+
+  debugDisplay.refresh();
+}
+
+
+// ==================================================
+// Dashboard update
+// ==================================================
+
+static void updateDashboard() {
+
+  if (
+    millis() -
+    lastDashboardUpdate <
+    1000
+  ) {
+
+    return;
+  }
+
+
+  lastDashboardUpdate =
+    millis();
+
+
+  // -----------------------------------------------
+  // RTC
+  // -----------------------------------------------
+
+  readRtc();
+
+
+  // -----------------------------------------------
+  // NTP → RTC
+  //
+  // Only synchronize when:
+  //   - WiFi is connected
+  //   - RTC is invalid
+  //   - RTC has not already been synchronized
+  // -----------------------------------------------
+
+  if (
+    WiFi.status() ==
+      WL_CONNECTED
+  ) {
+
+    startNtp();
+
+
+    if (
+      !rtcValid &&
+      !rtcSyncedFromNtp
+    ) {
+
+      if (
+        syncRtcFromNtp()
+      ) {
+
+        DebugLog::println(
+          "RTC now valid"
+        );
+      }
+    }
+  }
+
+
+  // -----------------------------------------------
+  // RTC display
+  // -----------------------------------------------
+
+  updateRtcDashboard();
+
+
+  // -----------------------------------------------
+  // Runtime
+  // -----------------------------------------------
+
+  debugDisplay.setRuntime(
+    formatRuntime(
+      millis()
+    )
+  );
+
+
+  // -----------------------------------------------
+  // WiFi
+  // -----------------------------------------------
+
+  updateConnectionDashboard();
+
+
+  // -----------------------------------------------
+  // System log
+  // -----------------------------------------------
+
+  debugDisplay.setSystemLog(
+    "OK",
+    "OK",
+    "OK",
+    String(
+      wifiReconnectCount
+    )
+  );
+
+
+  // -----------------------------------------------
+  // Hardware
+  // -----------------------------------------------
+
+  debugDisplay.setHardware(
+    ESP.getPsramSize() > 0
+      ? "OK"
+      : "NO",
+
+    String(
+      ESP.getFreeHeap()
+    ) + " B",
+
+    String(
+      ESP.getFlashChipSize() /
+      (1024UL * 1024UL)
+    ) + " MB",
+
+    String(
+      ESP.getCpuFreqMHz()
+    ) + " MHz"
+  );
+
+
+  // -----------------------------------------------
+  // One complete framebuffer refresh
+  // -----------------------------------------------
+
+  debugDisplay.refresh();
+}
+
+
+// ==================================================
+// Setup
+// ==================================================
+
 void setup() {
+
+  const unsigned long bootStart =
+    millis();
+
 
   // --------------------------------------------------
   // Serial
   // --------------------------------------------------
 
-  Serial.begin(115200);
+  DebugLog::begin(
+    115200
+  );
+
+
   delay(2000);
 
-  Serial.println();
-  Serial.println("================================");
-  Serial.println("Waveshare ESP32-S3 4.3B");
-  Serial.println("Sauna Debug Display Test");
-  Serial.println("================================");
+
+  DebugLog::println();
+
+
+  DebugLog::println(
+    "================================"
+  );
+
+
+  DebugLog::println(
+    "Waveshare ESP32-S3 4.3B"
+  );
+
+
+  DebugLog::println(
+    "Sauna Debug Dashboard"
+  );
+
+
+  DebugLog::println(
+    "================================"
+  );
 
 
   // --------------------------------------------------
   // Board
   // --------------------------------------------------
 
-  board = new Board();
+  board =
+    new Board();
 
-  Serial.println("Board created");
 
-  if (!board->init()) {
-    Serial.println("ERROR: board init failed");
+  DebugLog::println(
+    "Board created"
+  );
+
+
+  if (
+    !board->init()
+  ) {
+
+    DebugLog::println(
+      "ERROR: board init failed"
+    );
+
     return;
   }
 
-  Serial.println("Board initialized");
+
+  DebugLog::println(
+    "Board initialized"
+  );
 
 
   // --------------------------------------------------
   // LCD
   // --------------------------------------------------
 
-  lcd = board->getLCD();
+  lcd =
+    board->getLCD();
+
 
   if (!lcd) {
-    Serial.println("ERROR: LCD not found");
+
+    DebugLog::println(
+      "ERROR: LCD not found"
+    );
+
     return;
   }
 
-  Serial.println("LCD found");
+
+  DebugLog::println(
+    "LCD found"
+  );
 
 
   // --------------------------------------------------
   // RGB bus
   // --------------------------------------------------
 
-  auto bus = lcd->getBus();
+  auto bus =
+    lcd->getBus();
 
-  if (bus->getBasicAttributes().type ==
-      ESP_PANEL_BUS_TYPE_RGB) {
 
-    Serial.println("RGB bus detected");
+  if (
+    bus->getBasicAttributes().type ==
+    ESP_PANEL_BUS_TYPE_RGB
+  ) {
 
-    auto rgb = static_cast<BusRGB *>(bus);
+    DebugLog::println(
+      "RGB bus detected"
+    );
+
+
+    auto rgb =
+      static_cast<BusRGB*>(
+        bus
+      );
+
 
     rgb->configRGB_BounceBufferSize(
       lcd->getFrameWidth() * 20
     );
 
-    Serial.println("RGB buffer configured");
+
+    DebugLog::println(
+      "RGB buffer configured"
+    );
   }
 
 
   // --------------------------------------------------
-  // Start board / display
+  // Board begin
   // --------------------------------------------------
 
-  if (!board->begin()) {
-    Serial.println("ERROR: board begin failed");
+  if (
+    !board->begin()
+  ) {
+
+    DebugLog::println(
+      "ERROR: board begin failed"
+    );
+
     return;
   }
 
-  Serial.println("DISPLAY INITIALIZED!");
+
+  DebugLog::println(
+    "DISPLAY INITIALIZED!"
+  );
 
 
   // --------------------------------------------------
-  // Start debug display
+  // Debug dashboard
   // --------------------------------------------------
 
-  if (!debug.begin(lcd)) {
-    Serial.println(
+  if (
+    !debugDisplay.begin(
+      lcd
+    )
+  ) {
+
+    DebugLog::println(
       "ERROR: Debug display init failed"
     );
+
     return;
   }
 
 
   // --------------------------------------------------
-  // Test information
+  // RTC
+  // --------------------------------------------------
+  //
+  // ESP32_Display_Panel owns I2C_NUM_0.
+  //
+  // PCF85063 uses the same existing host.
+  //
+  // No Wire.begin().
+  // No SensorLib.
+  // No I2C driver installation.
   // --------------------------------------------------
 
-  debug.println("SYSTEM");
-
-  debug.status("Board", true);
-  debug.status("Display", true);
-  debug.status("Touch", true);
-
-  debug.println("");
-  debug.println("SENSORS");
-
-  debug.status("DS2484", false);
-  debug.status("K-Type", false);
-
-  debug.println("");
-  debug.println("TEST VALUES");
-
-  debug.value(
-    "Temperature",
-    23.4,
-    "C"
+  DebugLog::println(
+    "Initializing PCF85063 RTC..."
   );
 
-  debug.value(
-    "Humidity",
-    48.0,
-    "%"
+
+  if (
+    rtc.begin()
+  ) {
+
+    DebugLog::println(
+      "RTC found"
+    );
+
+
+    if (
+      readRtc()
+    ) {
+
+      DebugLog::printf(
+        "RTC time: %04d-%02d-%02d %02d:%02d:%02d\n",
+
+        rtcDateTime.year,
+        rtcDateTime.month,
+        rtcDateTime.day,
+        rtcDateTime.hour,
+        rtcDateTime.minute,
+        rtcDateTime.second
+      );
+
+    } else {
+
+      DebugLog::println(
+        "RTC found, but time is invalid"
+      );
+    }
+
+  } else {
+
+    DebugLog::println(
+      "RTC: PCF85063 not found"
+    );
+
+
+    rtcValid =
+      false;
+  }
+
+
+  // --------------------------------------------------
+  // Initialization time
+  // --------------------------------------------------
+
+  initTimeMs =
+    millis() -
+    bootStart;
+
+
+  DebugLog::printf(
+    "[BOOT] TOTAL INIT = %lu ms\n",
+    initTimeMs
   );
 
-  debug.value(
-    "Pressure",
-    1012.0,
-    "hPa"
-  );
 
-  debug.println("");
-  debug.println("System running");
+  // --------------------------------------------------
+  // Initial dashboard
+  // --------------------------------------------------
+
+  buildDashboard();
 
 
   // --------------------------------------------------
@@ -229,37 +956,149 @@ void setup() {
   // --------------------------------------------------
 
   connectWiFiAtStartup();
+
+
+  // --------------------------------------------------
+  // NTP / RTC synchronization
+  //
+  // Only set RTC when it is currently invalid.
+  // --------------------------------------------------
+
+  if (
+    WiFi.status() ==
+    WL_CONNECTED
+  ) {
+
+    startNtp();
+
+
+    if (
+      !rtcValid
+    ) {
+
+      syncRtcFromNtp();
+    }
+  }
+
+
+  // --------------------------------------------------
+  // Final dashboard update
+  // --------------------------------------------------
+
+  readRtc();
+
+  updateConnectionDashboard();
+
+  updateRtcDashboard();
+
+
+  debugDisplay.setRuntime(
+    formatRuntime(
+      millis()
+    )
+  );
+
+
+  debugDisplay.refresh();
 }
 
 
+// ==================================================
+// Loop
+// ==================================================
+
 void loop() {
 
-  // Update uptime clock
-  debug.update();
+  const bool wifiConnected =
+    WiFi.status() ==
+    WL_CONNECTED;
 
 
-  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+  // --------------------------------------------------
+  // Newly connected
+  // --------------------------------------------------
 
-  if (wifiConnected && !wifiWasConnected) {
+  if (
+    wifiConnected &&
+    !wifiWasConnected
+  ) {
+
     showWiFiConnection();
+
+
+    debugDisplay.refresh();
   }
 
-  if (!wifiConnected && wifiWasConnected) {
-    Serial.println("WiFi disconnected");
-    Serial.println("WiFi disconnected");
-    debug.wifiStatus("WiFi    WAITING");
-    wifiWasConnected = false;
+
+  // --------------------------------------------------
+  // Disconnected
+  // --------------------------------------------------
+
+  if (
+    !wifiConnected &&
+    wifiWasConnected
+  ) {
+
+    DebugLog::println(
+      "WiFi disconnected"
+    );
+
+
+    wifiWasConnected =
+      false;
+
+
+    updateConnectionDashboard();
+
+
+    debugDisplay.refresh();
   }
 
-  if (!wifiConnected &&
-      millis() - lastWiFiReconnectAttempt >=
-        WIFI_RECONNECT_INTERVAL_MS) {
+
+  // --------------------------------------------------
+  // Reconnect
+  // --------------------------------------------------
+
+  if (
+    !wifiConnected &&
+    millis() -
+      lastWiFiReconnectAttempt >=
+        WIFI_RECONNECT_INTERVAL_MS
+  ) {
+
+    ++wifiReconnectCount;
+
 
     startWiFiConnection(
       "WiFi reconnecting...",
-      "WiFi    RECONNECTING..."
+      "RECONNECTING"
     );
+
+
+    debugDisplay.setSystemLog(
+      "OK",
+      "OK",
+      "OK",
+      String(
+        wifiReconnectCount
+      )
+    );
+
+
+    debugDisplay.refresh();
   }
+
+
+  // --------------------------------------------------
+  // Dashboard
+  // --------------------------------------------------
+
+  updateDashboard();
+
+
+  // --------------------------------------------------
+  // Main loop timing
+  // --------------------------------------------------
 
   delay(100);
 }
