@@ -21,7 +21,6 @@ constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS =
     10000;
 
 
-
 // ==================================================
 // Static data
 // ==================================================
@@ -46,13 +45,6 @@ SysteemStatus::_lastWiFiReconnectAttempt = 0;
 // Begin
 // ==================================================
 
-void SysteemStatus::setInitTime(
-    unsigned long milliseconds
-)
-{
-    _data.initTimeMs = milliseconds;
-}
-
 bool SysteemStatus::begin()
 {
     _data.boardOk = false;
@@ -72,11 +64,21 @@ bool SysteemStatus::begin()
     _data.ds2484Present = false;
     _data.kTypeValid = false;
 
+    // ------------------------------------------------
+    // Hardware
+    // ------------------------------------------------
+
     _data.psram =
         ESP.getPsramSize() > 0;
 
     _data.freeHeap =
         ESP.getFreeHeap();
+
+    // First valid measurement is also the minimum.
+    _data.minFreeHeap =
+        _data.freeHeap;
+
+    _data.minFreeHeap = 0;
 
     _data.cpuMHz =
         ESP.getCpuFreqMHz();
@@ -90,6 +92,19 @@ bool SysteemStatus::begin()
 
 
 // ==================================================
+// Set initialization time
+// ==================================================
+
+void SysteemStatus::setInitTime(
+    unsigned long milliseconds
+)
+{
+    _data.initTimeMs =
+        milliseconds;
+}
+
+
+// ==================================================
 // Update
 // ==================================================
 
@@ -98,14 +113,52 @@ void SysteemStatus::update()
     _data.runtimeMs =
         millis();
 
+
+    // ------------------------------------------------
+    // Hardware
+    // ------------------------------------------------
+
     _data.freeHeap =
         ESP.getFreeHeap();
 
+
+    // Keep the lowest value seen since boot.
+    if (
+        _data.minFreeHeap == 0 ||
+        _data.freeHeap < _data.minFreeHeap
+    ) {
+        _data.minFreeHeap =
+            _data.freeHeap;
+    }
     _data.cpuMHz =
         ESP.getCpuFreqMHz();
 
+
     _data.psram =
         ESP.getPsramSize() > 0;
+
+
+    // Read flash size here as well.
+    //
+    // This is important because begin() may be called
+    // before the complete board/display initialization.
+    //
+    const uint32_t flashSize =
+        ESP.getFlashChipSize();
+
+
+    if (
+        flashSize > 0
+    ) {
+        _data.flashSizeMb =
+            flashSize /
+            (1024UL * 1024UL);
+    }
+
+
+    // ------------------------------------------------
+    // WiFi
+    // ------------------------------------------------
 
     updateWiFi();
 }
@@ -133,13 +186,16 @@ bool SysteemStatus::initializeRtc()
     );
 
 
-    if (!_rtc.begin()) {
+    if (
+        !_rtc.begin()
+    ) {
 
         DebugLog::println(
             "RTC: PCF85063 not found"
         );
 
-        _data.rtcValid = false;
+        _data.rtcValid =
+            false;
 
         return false;
     }
@@ -150,7 +206,9 @@ bool SysteemStatus::initializeRtc()
     );
 
 
-    if (readRtc()) {
+    if (
+        readRtc()
+    ) {
 
         DebugLog::printf(
             "RTC time: %04d-%02d-%02d %02d:%02d:%02d\n",
@@ -173,6 +231,10 @@ bool SysteemStatus::initializeRtc()
     return false;
 }
 
+
+// ==================================================
+// RTC update
+// ==================================================
 
 void SysteemStatus::updateRtc()
 {
@@ -208,6 +270,10 @@ void SysteemStatus::updateRtc()
 }
 
 
+// ==================================================
+// RTC read
+// ==================================================
+
 bool SysteemStatus::readRtc()
 {
     if (
@@ -216,13 +282,15 @@ bool SysteemStatus::readRtc()
         )
     ) {
 
-        _data.rtcValid = false;
+        _data.rtcValid =
+            false;
 
         return false;
     }
 
 
-    _data.rtcValid = true;
+    _data.rtcValid =
+        true;
 
     return true;
 }
@@ -234,7 +302,9 @@ bool SysteemStatus::readRtc()
 
 void SysteemStatus::startNtp()
 {
-    if (_ntpStarted) {
+    if (
+        _ntpStarted
+    ) {
         return;
     }
 
@@ -246,7 +316,8 @@ void SysteemStatus::startNtp()
     );
 
 
-    _ntpStarted = true;
+    _ntpStarted =
+        true;
 
 
     DebugLog::println(
@@ -255,9 +326,15 @@ void SysteemStatus::startNtp()
 }
 
 
+// ==================================================
+// Sync RTC from NTP
+// ==================================================
+
 bool SysteemStatus::syncRtcFromNtp()
 {
-    if (!_ntpStarted) {
+    if (
+        !_ntpStarted
+    ) {
         return false;
     }
 
@@ -451,6 +528,7 @@ void SysteemStatus::updateWiFi()
             "WiFi disconnected"
         );
 
+
         _data.wifiConnected =
             false;
 
@@ -484,7 +562,9 @@ void SysteemStatus::updateWiFi()
     // Normal connected status
     // ------------------------------------------------
 
-    if (connected) {
+    if (
+        connected
+    ) {
 
         _data.wifiConnected =
             true;
@@ -528,6 +608,10 @@ void SysteemStatus::printWiFiStatus(
 }
 
 
+// ==================================================
+// Start WiFi connection
+// ==================================================
+
 void SysteemStatus::startWiFiConnection(
     const char* message
 )
@@ -552,6 +636,10 @@ void SysteemStatus::startWiFiConnection(
         millis();
 }
 
+
+// ==================================================
+// Show WiFi connection
+// ==================================================
 
 void SysteemStatus::showWiFiConnection()
 {

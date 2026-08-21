@@ -39,6 +39,7 @@ public:
         // Hardware
         bool psram = false;
         uint32_t freeHeap = 0;
+        uint32_t minFreeHeap = 0;
         uint32_t cpuMHz = 0;
         uint32_t flashSizeMb = 0;
     };

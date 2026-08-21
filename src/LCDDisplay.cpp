@@ -152,9 +152,6 @@ void updateSensors()
 
 void updateTestValues()
 {
-    // Existing test values.
-    // No sensor functionality is added here.
-
     debugDisplay.setTestValues(
         "23.4 C",
         "48.0 %",
@@ -207,7 +204,11 @@ void updateHardware()
 
         String(
             status.cpuMHz
-        ) + " MHz"
+        ) + " MHz",
+
+        String(
+            status.minFreeHeap
+        ) + " B"
     );
 }
 

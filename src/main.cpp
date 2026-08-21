@@ -1,29 +1,24 @@
 #include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
 #include <esp_display_panel.hpp>
 
 #include "DebugLog.h"
-#include "LCDDisplay.h"
+#include "PCF85063.h"
 #include "SysteemStatus.h"
+#include "LCDDisplay.h"
+#include "Web.h"
 
 
-using namespace esp_panel::board;
 using namespace esp_panel::drivers;
 
 
 // ==================================================
-// Board / physical LCD
+// Globals
 // ==================================================
 
-Board* board = nullptr;
-
-esp_panel::drivers::LCD* lcd = nullptr;
-
-
-// ==================================================
-// Boot timing
-// ==================================================
-
-unsigned long bootStart = 0;
+esp_panel::board::Board* board = nullptr;
 
 
 // ==================================================
@@ -32,20 +27,9 @@ unsigned long bootStart = 0;
 
 void setup()
 {
-    bootStart = millis();
+    const unsigned long bootStart =
+        millis();
 
-
-    // --------------------------------------------------
-    // Serial
-    // --------------------------------------------------
-
-    DebugLog::begin(
-        115200
-    );
-
-    delay(2000);
-
-    DebugLog::println();
 
     DebugLog::println(
         "================================"
@@ -64,12 +48,22 @@ void setup()
     );
 
 
-    // --------------------------------------------------
+    // =================================================
     // Board
-    // --------------------------------------------------
+    // =================================================
 
     board =
-        new Board();
+        new esp_panel::board::Board();
+
+
+    if (!board)
+    {
+        DebugLog::println(
+            "ERROR: Board allocation failed"
+        );
+
+        return;
+    }
 
 
     DebugLog::println(
@@ -77,10 +71,14 @@ void setup()
     );
 
 
+    // -------------------------------------------------
+    // Board initialization
+    // -------------------------------------------------
+
     if (!board->init())
     {
         DebugLog::println(
-            "ERROR: board init failed"
+            "ERROR: Board initialization failed"
         );
 
         return;
@@ -92,11 +90,11 @@ void setup()
     );
 
 
-    // --------------------------------------------------
-    // Physical LCD
-    // --------------------------------------------------
+    // =================================================
+    // LCD
+    // =================================================
 
-    lcd =
+    auto lcd =
         board->getLCD();
 
 
@@ -115,16 +113,22 @@ void setup()
     );
 
 
-    // --------------------------------------------------
-    // RGB bus
-    // --------------------------------------------------
-
-    auto bus =
+    auto lcdBus =
         lcd->getBus();
 
 
+    if (!lcdBus)
+    {
+        DebugLog::println(
+            "ERROR: LCD bus not found"
+        );
+
+        return;
+    }
+
+
     if (
-        bus->getBasicAttributes().type ==
+        lcdBus->getBasicAttributes().type ==
         ESP_PANEL_BUS_TYPE_RGB
     )
     {
@@ -133,31 +137,48 @@ void setup()
         );
 
 
-        auto rgb =
-            static_cast<BusRGB*>(
-                bus
-            );
+        // ------------------------------------------------
+        // RGB bounce buffer
+        //
+        // ESP32-S3 RGB LCD:
+        // width * 10 pixels
+        // ------------------------------------------------
+
+        auto rgbBus =
+            static_cast<BusRGB*>(lcdBus);
 
 
-        rgb->configRGB_BounceBufferSize(
-            lcd->getFrameWidth() * 20
+        const int bounceBufferSize =
+            lcd->getFrameWidth() * 10;
+
+
+        rgbBus->configRGB_BounceBufferSize(
+            bounceBufferSize
         );
 
 
+        DebugLog::print(
+            "RGB bounce buffer: "
+        );
+
+        DebugLog::print(
+            bounceBufferSize
+        );
+
         DebugLog::println(
-            "RGB buffer configured"
+            " pixels"
         );
     }
 
 
-    // --------------------------------------------------
+    // =================================================
     // Board begin
-    // --------------------------------------------------
+    // =================================================
 
     if (!board->begin())
     {
         DebugLog::println(
-            "ERROR: board begin failed"
+            "ERROR: Board begin failed"
         );
 
         return;
@@ -169,86 +190,79 @@ void setup()
     );
 
 
-    // --------------------------------------------------
-    // SysteemStatus
-    // --------------------------------------------------
+    // =================================================
+    // LCD debug display
+    // =================================================
 
-    SysteemStatus::begin();
-
-
-    // --------------------------------------------------
-    // LCD presentation layer
-    // --------------------------------------------------
-
-    if (!LCDDisplay::begin(lcd))
+    if (
+        !LCDDisplay::begin(lcd)
+    )
     {
         DebugLog::println(
-            "ERROR: LCD display init failed"
+            "ERROR: LCDDisplay initialization failed"
         );
 
         return;
     }
 
 
-    // --------------------------------------------------
-    // RTC
-    // --------------------------------------------------
-
-    SysteemStatus::initializeRtc();
-
-
-    // --------------------------------------------------
-    // Initialization time
-    // --------------------------------------------------
-
-    const unsigned long initTime =
-        millis() - bootStart;
-
-
-    SysteemStatus::setInitTime(
-        initTime
-    );
-
-
-    DebugLog::printf(
-        "[BOOT] TOTAL INIT = %lu ms\n",
-        initTime
-    );
-
-
-    // --------------------------------------------------
-    // Initial dashboard
-    // --------------------------------------------------
-
-    SysteemStatus::update();
-
-    SysteemStatus::updateRtc();
-
     LCDDisplay::update();
     LCDDisplay::refresh();
 
 
-    // --------------------------------------------------
+    // =================================================
+    // RTC
+    // =================================================
+
+    DebugLog::println(
+        "Initializing PCF85063 RTC..."
+    );
+
+
+    SysteemStatus::initializeRtc();
+
+
+    // =================================================
+    // System initialization time
+    // =================================================
+
+    SysteemStatus::setInitTime(
+        millis() - bootStart
+    );
+
+
+    DebugLog::print(
+        "[BOOT] TOTAL INIT = "
+    );
+
+    DebugLog::print(
+        millis() - bootStart
+    );
+
+    DebugLog::println(
+        " ms"
+    );
+
+
+    // =================================================
     // WiFi
-    // --------------------------------------------------
+    // =================================================
 
     SysteemStatus::initializeWiFi();
 
 
-    // --------------------------------------------------
-    // NTP / RTC synchronization
-    // --------------------------------------------------
+    // =================================================
+    // Web
+    // =================================================
 
-    SysteemStatus::updateRtc();
+    Web::begin();
 
 
-    // --------------------------------------------------
-    // Final dashboard
-    // --------------------------------------------------
+    // =================================================
+    // Initial system update
+    // =================================================
 
     SysteemStatus::update();
-
-    SysteemStatus::updateRtc();
 
     LCDDisplay::update();
     LCDDisplay::refresh();
@@ -261,32 +275,49 @@ void setup()
 
 void loop()
 {
-    // --------------------------------------------------
+    // -------------------------------------------------
     // System status
-    // --------------------------------------------------
+    // -------------------------------------------------
 
     SysteemStatus::update();
 
 
-    // --------------------------------------------------
+    // -------------------------------------------------
     // RTC
-    // --------------------------------------------------
+    // -------------------------------------------------
 
     SysteemStatus::updateRtc();
 
 
-    // --------------------------------------------------
+    // -------------------------------------------------
+    // Web
+    // -------------------------------------------------
+
+    Web::update();
+
+
+    // -------------------------------------------------
     // LCD
-    // --------------------------------------------------
+    //
+    // Update once per second.
+    // -------------------------------------------------
 
-    LCDDisplay::update();
-
-    LCDDisplay::refresh();
+    static unsigned long lastLcdUpdate = 0;
 
 
-    // --------------------------------------------------
-    // Loop timing
-    // --------------------------------------------------
+    if (
+        millis() - lastLcdUpdate >= 1000
+    )
+    {
+        lastLcdUpdate =
+            millis();
 
-    delay(100);
+
+        LCDDisplay::update();
+
+        LCDDisplay::refresh();
+    }
+
+
+    delay(1);
 }
