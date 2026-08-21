@@ -210,6 +210,7 @@ private:
 
     drawString(LEFT_X, 6, "SAUNA DEBUG", _headerTextColor);
     drawString(560, 4, _dateTime, _headerTextColor);
+    
     fillRect(
       DIVIDER_X,
       HEADER_H,
