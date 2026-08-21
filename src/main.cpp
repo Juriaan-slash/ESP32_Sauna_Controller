@@ -1,351 +1,29 @@
 #include <Arduino.h>
-#include <WiFi.h>
 #include <esp_display_panel.hpp>
 
 #include "DebugLog.h"
-#include "SaunaDebugDisplay.h"
+#include "LCDDisplay.h"
 #include "SysteemStatus.h"
-#include "wifi_secrets.h"
+
 
 using namespace esp_panel::board;
 using namespace esp_panel::drivers;
 
 
 // ==================================================
-// Board / display
+// Board / physical LCD
 // ==================================================
 
 Board* board = nullptr;
-LCD* lcd = nullptr;
 
-SaunaDebugDisplay debugDisplay;
-
-
-// ==================================================
-// Dashboard timing
-// ==================================================
-
-unsigned long initTimeMs = 0;
-unsigned long lastDashboardUpdate = 0;
+esp_panel::drivers::LCD* lcd = nullptr;
 
 
 // ==================================================
-// Formatting helpers
+// Boot timing
 // ==================================================
 
-static String formatRuntime(
-    unsigned long milliseconds
-)
-{
-    unsigned long totalSeconds =
-        milliseconds / 1000UL;
-
-
-    const unsigned long hours =
-        totalSeconds / 3600UL;
-
-
-    totalSeconds %= 3600UL;
-
-
-    const unsigned long minutes =
-        totalSeconds / 60UL;
-
-
-    const unsigned long seconds =
-        totalSeconds % 60UL;
-
-
-    char buffer[16];
-
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "%02lu:%02lu:%02lu",
-        hours,
-        minutes,
-        seconds
-    );
-
-
-    return String(buffer);
-}
-
-
-static String formatRtcDateTime(
-    const PCF85063::DateTime& dt
-)
-{
-    char buffer[32];
-
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "%04d-%02d-%02d %02d:%02d:%02d",
-        dt.year,
-        dt.month,
-        dt.day,
-        dt.hour,
-        dt.minute,
-        dt.second
-    );
-
-
-    return String(buffer);
-}
-
-
-// ==================================================
-// RTC display
-// ==================================================
-
-static void updateRtcDashboard()
-{
-    const auto& status =
-        SysteemStatus::get();
-
-
-    if (status.rtcValid) {
-
-        debugDisplay.setDateTime(
-            formatRtcDateTime(
-                status.rtcDateTime
-            ),
-            "OK"
-        );
-
-    } else {
-
-        debugDisplay.setDateTime(
-            "RTC INVALID",
-            "INVALID"
-        );
-    }
-}
-
-
-// ==================================================
-// WiFi display
-// ==================================================
-
-static void updateConnectionDashboard()
-{
-    const auto& status =
-        SysteemStatus::get();
-
-
-    if (status.wifiConnected) {
-
-        debugDisplay.setConnection(
-            "OK",
-            WIFI_SSID,
-            status.wifiIp,
-            String(status.wifiRssi) +
-                " dBm",
-            status.rtcValid
-                ? "OK"
-                : "INVALID"
-        );
-
-    } else {
-
-        debugDisplay.setConnection(
-            "WAITING",
-            WIFI_SSID,
-            "---",
-            "---",
-            status.rtcValid
-                ? "OK"
-                : "INVALID"
-        );
-    }
-}
-
-
-// ==================================================
-// Dashboard
-// ==================================================
-
-static void buildDashboard()
-{
-    const auto& status =
-        SysteemStatus::get();
-
-
-    debugDisplay.setSystem(
-        "OK",
-        "OK",
-        "OK",
-        String(initTimeMs) +
-            " ms",
-        formatRuntime(
-            millis()
-        )
-    );
-
-
-    updateConnectionDashboard();
-
-
-    debugDisplay.setSensors(
-        "WAITING",
-        "WAITING",
-        "--",
-        "--"
-    );
-
-
-    debugDisplay.setTestValues(
-        "23.4 C",
-        "48.0 %",
-        "1012.0 hPa"
-    );
-
-
-    debugDisplay.setSystemLog(
-        "OK",
-        "OK",
-        "OK",
-        String(
-            status.wifiReconnectCount
-        )
-    );
-
-
-    debugDisplay.setHardware(
-        status.psram
-            ? "OK"
-            : "NO",
-
-        String(
-            status.freeHeap
-        ) + " B",
-
-        String(
-            status.flashSizeMb
-        ) + " MB",
-
-        String(
-            status.cpuMHz
-        ) + " MHz"
-    );
-
-
-    updateRtcDashboard();
-
-
-    debugDisplay.refresh();
-}
-
-
-// ==================================================
-// Dashboard update
-// ==================================================
-
-static void updateDashboard()
-{
-    if (
-        millis() -
-        lastDashboardUpdate <
-        1000
-    ) {
-
-        return;
-    }
-
-
-    lastDashboardUpdate =
-        millis();
-
-
-    // -----------------------------------------------
-    // System status
-    // -----------------------------------------------
-
-    SysteemStatus::update();
-
-
-    // -----------------------------------------------
-    // RTC
-    // -----------------------------------------------
-
-    SysteemStatus::updateRtc();
-
-
-    // -----------------------------------------------
-    // RTC display
-    // -----------------------------------------------
-
-    updateRtcDashboard();
-
-
-    // -----------------------------------------------
-    // Runtime
-    // -----------------------------------------------
-
-    debugDisplay.setRuntime(
-        formatRuntime(
-            millis()
-        )
-    );
-
-
-    // -----------------------------------------------
-    // WiFi display
-    // -----------------------------------------------
-
-    updateConnectionDashboard();
-
-
-    // -----------------------------------------------
-    // System log
-    // -----------------------------------------------
-
-    const auto& status =
-        SysteemStatus::get();
-
-
-    debugDisplay.setSystemLog(
-        "OK",
-        "OK",
-        "OK",
-        String(
-            status.wifiReconnectCount
-        )
-    );
-
-
-    // -----------------------------------------------
-    // Hardware
-    // -----------------------------------------------
-
-    debugDisplay.setHardware(
-        status.psram
-            ? "OK"
-            : "NO",
-
-        String(
-            status.freeHeap
-        ) + " B",
-
-        String(
-            status.flashSizeMb
-        ) + " MB",
-
-        String(
-            status.cpuMHz
-        ) + " MHz"
-    );
-
-
-    // -----------------------------------------------
-    // One complete framebuffer refresh
-    // -----------------------------------------------
-
-    debugDisplay.refresh();
-}
+unsigned long bootStart = 0;
 
 
 // ==================================================
@@ -354,8 +32,7 @@ static void updateDashboard()
 
 void setup()
 {
-    const unsigned long bootStart =
-        millis();
+    bootStart = millis();
 
 
     // --------------------------------------------------
@@ -366,27 +43,21 @@ void setup()
         115200
     );
 
-
     delay(2000);
 
-
     DebugLog::println();
-
 
     DebugLog::println(
         "================================"
     );
 
-
     DebugLog::println(
         "Waveshare ESP32-S3 4.3B"
     );
 
-
     DebugLog::println(
         "Sauna Debug Dashboard"
     );
-
 
     DebugLog::println(
         "================================"
@@ -406,10 +77,8 @@ void setup()
     );
 
 
-    if (
-        !board->init()
-    ) {
-
+    if (!board->init())
+    {
         DebugLog::println(
             "ERROR: board init failed"
         );
@@ -424,15 +93,15 @@ void setup()
 
 
     // --------------------------------------------------
-    // LCD
+    // Physical LCD
     // --------------------------------------------------
 
     lcd =
         board->getLCD();
 
 
-    if (!lcd) {
-
+    if (!lcd)
+    {
         DebugLog::println(
             "ERROR: LCD not found"
         );
@@ -457,8 +126,8 @@ void setup()
     if (
         bus->getBasicAttributes().type ==
         ESP_PANEL_BUS_TYPE_RGB
-    ) {
-
+    )
+    {
         DebugLog::println(
             "RGB bus detected"
         );
@@ -485,10 +154,8 @@ void setup()
     // Board begin
     // --------------------------------------------------
 
-    if (
-        !board->begin()
-    ) {
-
+    if (!board->begin())
+    {
         DebugLog::println(
             "ERROR: board begin failed"
         );
@@ -503,28 +170,24 @@ void setup()
 
 
     // --------------------------------------------------
-    // Debug dashboard
-    // --------------------------------------------------
-
-    if (
-        !debugDisplay.begin(
-            lcd
-        )
-    ) {
-
-        DebugLog::println(
-            "ERROR: Debug display init failed"
-        );
-
-        return;
-    }
-
-
-    // --------------------------------------------------
     // SysteemStatus
     // --------------------------------------------------
 
     SysteemStatus::begin();
+
+
+    // --------------------------------------------------
+    // LCD presentation layer
+    // --------------------------------------------------
+
+    if (!LCDDisplay::begin(lcd))
+    {
+        DebugLog::println(
+            "ERROR: LCD display init failed"
+        );
+
+        return;
+    }
 
 
     // --------------------------------------------------
@@ -538,14 +201,18 @@ void setup()
     // Initialization time
     // --------------------------------------------------
 
-    initTimeMs =
-        millis() -
-        bootStart;
+    const unsigned long initTime =
+        millis() - bootStart;
+
+
+    SysteemStatus::setInitTime(
+        initTime
+    );
 
 
     DebugLog::printf(
         "[BOOT] TOTAL INIT = %lu ms\n",
-        initTimeMs
+        initTime
     );
 
 
@@ -553,7 +220,12 @@ void setup()
     // Initial dashboard
     // --------------------------------------------------
 
-    buildDashboard();
+    SysteemStatus::update();
+
+    SysteemStatus::updateRtc();
+
+    LCDDisplay::update();
+    LCDDisplay::refresh();
 
 
     // --------------------------------------------------
@@ -571,36 +243,15 @@ void setup()
 
 
     // --------------------------------------------------
-    // Final dashboard update
+    // Final dashboard
     // --------------------------------------------------
 
     SysteemStatus::update();
 
     SysteemStatus::updateRtc();
 
-    updateRtcDashboard();
-
-    updateConnectionDashboard();
-
-
-    debugDisplay.setRuntime(
-        formatRuntime(
-            millis()
-        )
-    );
-
-
-    debugDisplay.setSystemLog(
-        "OK",
-        "OK",
-        "OK",
-        String(
-            SysteemStatus::get().wifiReconnectCount
-        )
-    );
-
-
-    debugDisplay.refresh();
+    LCDDisplay::update();
+    LCDDisplay::refresh();
 }
 
 
@@ -625,14 +276,16 @@ void loop()
 
 
     // --------------------------------------------------
-    // Dashboard
+    // LCD
     // --------------------------------------------------
 
-    updateDashboard();
+    LCDDisplay::update();
+
+    LCDDisplay::refresh();
 
 
     // --------------------------------------------------
-    // Main loop timing
+    // Loop timing
     // --------------------------------------------------
 
     delay(100);

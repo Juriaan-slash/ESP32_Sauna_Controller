@@ -21,6 +21,7 @@ constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS =
     10000;
 
 
+
 // ==================================================
 // Static data
 // ==================================================
@@ -44,6 +45,13 @@ SysteemStatus::_lastWiFiReconnectAttempt = 0;
 // ==================================================
 // Begin
 // ==================================================
+
+void SysteemStatus::setInitTime(
+    unsigned long milliseconds
+)
+{
+    _data.initTimeMs = milliseconds;
+}
 
 bool SysteemStatus::begin()
 {

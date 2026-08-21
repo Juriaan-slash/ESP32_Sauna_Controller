@@ -43,6 +43,7 @@ public:
         uint32_t flashSizeMb = 0;
     };
 
+    static void setInitTime(unsigned long milliseconds);
 
     static bool begin();
 
