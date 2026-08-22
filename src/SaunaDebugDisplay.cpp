@@ -245,12 +245,37 @@ void SaunaDebugDisplay::drawSection(
     );
 }
 
+uint16_t SaunaDebugDisplay::colorForStatus(
+    SysteemStatus::ValueStatus status
+)
+{
+    switch (status)
+    {
+        case SysteemStatus::ValueStatus::VALID:
+            return _foreground;
+
+        case SysteemStatus::ValueStatus::INVALID:
+            return _invalidColor;
+
+        case SysteemStatus::ValueStatus::ERROR:
+            return _errorColor;
+
+        case SysteemStatus::ValueStatus::WARNING:
+            return _warningColor;
+
+        case SysteemStatus::ValueStatus::PANIC:
+            return _panicColor;
+    }
+
+    return _foreground;
+}
 
 void SaunaDebugDisplay::drawField(
     int x,
     int y,
     const String& label,
-    const String& value
+    const String& value,
+    SysteemStatus::ValueStatus status
 )
 {
     drawString(
@@ -264,7 +289,7 @@ void SaunaDebugDisplay::drawField(
         x + VALUE_OFFSET,
         y,
         value,
-        _foreground
+        colorForStatus(status)
     );
 }
 
@@ -507,7 +532,8 @@ void SaunaDebugDisplay::redraw()
         RIGHT_X,
         y,
         "WiFi",
-        _wifi
+        _wifi,
+        _wifiStatus
     );
 
     y += LINE_HEIGHT;
@@ -516,7 +542,8 @@ void SaunaDebugDisplay::redraw()
         RIGHT_X,
         y,
         "SSID",
-        _ssid
+        _ssid,
+        _wifiStatus
     );
 
     y += LINE_HEIGHT;
@@ -534,7 +561,8 @@ void SaunaDebugDisplay::redraw()
         RIGHT_X,
         y,
         "RSSI",
-        _rssi
+        _rssi,
+        _rssiStatus
     );
 
     y += LINE_HEIGHT;
@@ -565,7 +593,8 @@ void SaunaDebugDisplay::redraw()
         RIGHT_X,
         y,
         "Temperature",
-        _temperature
+        _temperature,
+        _temperatureStatus
     );
 
     y += LINE_HEIGHT;
@@ -574,7 +603,8 @@ void SaunaDebugDisplay::redraw()
         RIGHT_X,
         y,
         "Humidity",
-        _humidity
+        _humidity,
+        _temperatureStatus
     );
 
     y += LINE_HEIGHT;
@@ -583,7 +613,8 @@ void SaunaDebugDisplay::redraw()
         RIGHT_X,
         y,
         "Pressure",
-        _pressure
+        _pressure,
+        _temperatureStatus
     );
 
     y += LINE_HEIGHT + 6;
@@ -739,16 +770,21 @@ void SaunaDebugDisplay::setSystem(
 
 void SaunaDebugDisplay::setConnection(
     const String& wifi,
+    SysteemStatus::ValueStatus wifiStatus,
     const String& ssid,
     const String& ip,
     const String& rssi,
+    SysteemStatus::ValueStatus rssiStatus,
     const String& rtc
 )
 {
     _wifi = wifi;
+    _wifiStatus = wifiStatus;
+
     _ssid = ssid;
     _ip = ip;
     _rssi = rssi;
+    _rssiStatus = rssiStatus;
     _rtc = rtc;
 
     _dirty = true;
@@ -773,13 +809,20 @@ void SaunaDebugDisplay::setSensors(
 
 void SaunaDebugDisplay::setTestValues(
     const String& temperature,
+    SysteemStatus::ValueStatus temperatureStatus,
     const String& humidity,
-    const String& pressure
+    SysteemStatus::ValueStatus humidityStatus,
+    const String& pressure,
+    SysteemStatus::ValueStatus pressureStatus
 )
 {
     _temperature = temperature;
     _humidity = humidity;
     _pressure = pressure;
+
+    _temperatureStatus = temperatureStatus;
+    _humidityStatus = humidityStatus;
+    _pressureStatus = pressureStatus;
 
     _dirty = true;
 }

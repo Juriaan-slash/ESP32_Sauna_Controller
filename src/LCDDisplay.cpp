@@ -101,24 +101,30 @@ void updateConnection()
         SysteemStatus::get();
 
     debugDisplay.setConnection(
-        status.wifiConnected
-            ? "OK"
-            : "WAITING",
+    status.wifiConnected
+        ? "OK"
+        : "WAITING",
 
-        WIFI_SSID,
+    status.wifiConnected
+        ? SysteemStatus::ValueStatus::VALID
+        : SysteemStatus::ValueStatus::INVALID,
 
-        status.wifiConnected
-            ? status.wifiIp
-            : "---",
+    WIFI_SSID,
 
-        status.wifiConnected
-            ? String(status.wifiRssi) + " dBm"
-            : "---",
+    status.wifiConnected
+        ? status.wifiIp
+        : "---",
 
-        status.rtcValid
-            ? "OK"
-            : "INVALID"
-    );
+    status.wifiConnected
+        ? String(status.wifiRssi) + " dBm"
+        : "---",
+
+    status.wifiRssiStatus,
+
+    status.rtcValid
+        ? "OK"
+        : "INVALID"
+);
 }
 
 
@@ -152,10 +158,55 @@ void updateSensors()
 
 void updateTestValues()
 {
+    const auto& status =
+        SysteemStatus::get();
+
+    // -------------------------------------------------
+    // Temperature
+    // -------------------------------------------------
+
+    const String temperatureText =
+        status.temperature.status ==
+            SysteemStatus::ValueStatus::INVALID
+            ? "---"
+            : String(status.temperature.value, 1) + " C";
+
+
+    // -------------------------------------------------
+    // Humidity
+    // -------------------------------------------------
+
+    const String humidityText =
+        status.humidity.status ==
+            SysteemStatus::ValueStatus::INVALID
+            ? "---"
+            : String(status.humidity.value, 1) + " %";
+
+
+    // -------------------------------------------------
+    // Pressure
+    // -------------------------------------------------
+
+    const String pressureText =
+        status.pressure.status ==
+            SysteemStatus::ValueStatus::INVALID
+            ? "---"
+            : String(status.pressure.value, 1) + " hPa";
+
+
+    // -------------------------------------------------
+    // Update display
+    // -------------------------------------------------
+
     debugDisplay.setTestValues(
-        "23.4 C",
-        "48.0 %",
-        "1012.0 hPa"
+        temperatureText,
+        status.temperature.status,
+
+        humidityText,
+        status.humidity.status,
+
+        pressureText,
+        status.pressure.status
     );
 }
 

@@ -59,6 +59,7 @@ bool SysteemStatus::begin()
     _data.wifiConnected = false;
     _data.wifiIp = "";
     _data.wifiRssi = 0;
+    _data.wifiRssiStatus = ValueStatus::INVALID;
     _data.wifiReconnectCount = 0;
 
     _data.ds2484Present = false;
@@ -509,6 +510,11 @@ void SysteemStatus::updateWiFi()
         _data.wifiRssi =
             WiFi.RSSI();
 
+        _data.wifiRssiStatus =
+            evaluateWifiRssi(
+                _data.wifiRssi
+            );
+
         showWiFiConnection();
 
         return;
@@ -535,6 +541,9 @@ void SysteemStatus::updateWiFi()
         _data.wifiIp = "";
 
         _data.wifiRssi = 0;
+
+        _data.wifiRssiStatus =
+            ValueStatus::INVALID;
     }
 
 
@@ -574,7 +583,30 @@ void SysteemStatus::updateWiFi()
 
         _data.wifiRssi =
             WiFi.RSSI();
+
+        _data.wifiRssiStatus =
+            evaluateWifiRssi(
+                _data.wifiRssi
+            );
     }
+}
+
+
+SysteemStatus::ValueStatus SysteemStatus::evaluateWifiRssi(
+    int rssi
+)
+{
+    if (rssi >= -70)
+    {
+        return ValueStatus::VALID;
+    }
+
+    if (rssi >= -80)
+    {
+        return ValueStatus::WARNING;
+    }
+
+    return ValueStatus::PANIC;
 }
 
 

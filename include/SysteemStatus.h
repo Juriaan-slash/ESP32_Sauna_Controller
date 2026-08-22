@@ -8,6 +8,21 @@ class SysteemStatus {
 
 public:
 
+    enum class ValueStatus
+    {
+        INVALID,
+        VALID,
+        ERROR,
+        WARNING,
+        PANIC
+    };
+
+    struct Measurement
+    {
+        float value;
+        ValueStatus status;
+    };
+
     struct Data {
 
         // System
@@ -28,12 +43,28 @@ public:
         bool wifiConnected = false;
         String wifiIp;
         int wifiRssi = 0;
+        ValueStatus wifiRssiStatus = ValueStatus::INVALID;
         unsigned long wifiReconnectCount = 0;
 
 
         // Sensors
         bool ds2484Present = false;
         bool kTypeValid = false;
+
+        Measurement temperature{
+            0.0f,
+            ValueStatus::INVALID
+        };
+
+        Measurement humidity{
+            0.0f,
+            ValueStatus::INVALID
+        };
+
+        Measurement pressure{
+            0.0f,
+        ValueStatus::INVALID
+        };
 
 
         // Hardware
@@ -52,6 +83,7 @@ public:
 
     static const Data& get();
 
+    static ValueStatus evaluateWifiRssi(int rssi);
 
     // RTC
     static bool initializeRtc();
