@@ -61,3 +61,10 @@ desktop.ini
 *.swp
 *~
 *_copy_*
+
+# ==========================================
+# PlatformIO / ESP-IDF generated files
+# ==========================================
+.dummy/
+sdkconfig.defaults
+sdkconfig.esp32-s3-devkitc-1
