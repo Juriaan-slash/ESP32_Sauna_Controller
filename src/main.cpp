@@ -30,7 +30,8 @@ void setup()
     const unsigned long bootStart =
         millis();
 
-
+    DebugLog::begin(115200);
+    
     DebugLog::println(
         "================================"
     );
@@ -149,7 +150,7 @@ void setup()
 
 
         const int bounceBufferSize =
-            lcd->getFrameWidth() * 10;
+            lcd->getFrameWidth() * 20;
 
 
         rgbBus->configRGB_BounceBufferSize(
@@ -214,9 +215,6 @@ void setup()
     // RTC
     // =================================================
 
-    DebugLog::println(
-        "Initializing PCF85063 RTC..."
-    );
 
 
     SysteemStatus::initializeRtc();
